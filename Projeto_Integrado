@@ -1,0 +1,226 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <wchar.h>
+
+typedef struct {
+  int hh, mm;
+} Time;
+
+// Converte hora:minuto em minutos totais
+int to_minutes(Time t) { return t.hh * 60 + t.mm; }
+
+// Calcula a diferença em minutos (considera se passou da meia-noite)
+int diff_minutes(Time start, Time end) {
+  int a = to_minutes(start);
+  int b = to_minutes(end);
+  if (b >= a)
+    return b - a;
+  return (24 * 60 - a) + b;
+}
+
+// Verifica se há horas extras noturnas (22h–5h)
+int is_night_extra(Time fim, double horas_extras) {
+  int start = to_minutes(fim);
+  int end = (start + (int)(horas_extras * 60)) % (24 * 60);
+  for (int t = start; t != end; t = (t + 1) % (24 * 60))
+    if (t >= 22 * 60 || t < 5 * 60)
+      return 1;
+  return 0;
+}
+
+// Lê o mês atual do sistema
+int mes_atual() {
+  time_t t = time(NULL);
+  struct tm *data = localtime(&t);
+  return data->tm_mon + 1;
+}
+
+// Verifica se deve resetar o CSV (nova virada de mês)
+void checar_reset_csv() {
+  FILE *meta = fopen("meta.txt", "r");
+  int mes_registrado = -1;
+  if (meta) {
+    fscanf(meta, "%d", &mes_registrado);
+    fclose(meta);
+  }
+
+  int mes_agora = mes_atual();
+
+  // Quando o mês mudar, renomeia o CSV e cria um novo
+  if (mes_registrado != mes_agora) {
+    char novo_nome[50];
+    time_t t = time(NULL);
+    struct tm *data = localtime(&t);
+    sprintf(novo_nome, "registros_%02d_%d.csv", data->tm_mon,
+            data->tm_year + 1900);
+
+    rename("registros.csv", novo_nome);
+    FILE *novo = fopen("registros.csv", "w");
+    if (novo) {
+      fprintf(novo, "ID,Nome,Salario,Horas_trabalhadas,Horas_extras,Tipo,"
+                    "Autorizado,Motivo,Valor_estimado\n");
+      fclose(novo);
+    }
+
+    meta = fopen("meta.txt", "w");
+    if (meta) {
+      fprintf(meta, "%d", mes_agora);
+      fclose(meta);
+    }
+
+    printf("🔄 Novo mês detectado. Registros antigos arquivados como '%s'.\n" ,
+           novo_nome);
+  }
+}
+
+// Busca salário mais recente pelo ID
+double buscar_salario_por_id(const char *id) {
+  FILE *f = fopen("registros.csv", "r");
+  if (!f)
+    return -1;
+  char linha[256];
+  fgets(linha, sizeof(linha), f); // pular cabeçalho
+
+  double salario = -1;
+  char id_csv[50];
+  while (fgets(linha, sizeof(linha), f)) {
+    char nome[100], tipo[20], autorizado[5], motivo[200];
+    double s, ht, he, valor;
+    sscanf(linha, "%[^,],%*[^,],%lf,%lf,%lf,%[^,],%[^,],%[^,],%lf", id_csv, &s,
+           &ht, &he, tipo, autorizado, motivo, &valor);
+    if (strcmp(id_csv, id) == 0)
+      salario = s;
+  }
+  fclose(f);
+  return salario;
+}
+
+// Soma horas extras autorizadas do mês
+double ler_horas_extras_mes() {
+  FILE *f = fopen("registros.csv", "r");
+  if (!f)
+    return 0.0;
+  char linha[256];
+  fgets(linha, sizeof(linha), f);
+  double total = 0.0;
+  while (fgets(linha, sizeof(linha), f)) {
+    double he;
+    char autorizado[10];
+    sscanf(linha, "%*[^,],%*[^,],%*f,%*f,%lf,%*[^,],%[^,]", &he, autorizado);
+    if (strcmp(autorizado, "SIM") == 0)
+      total += he;
+  }
+  fclose(f);
+  return total;
+}
+
+// Salva novo registro
+void salvar_registro(const char *id, const char *nome, double salario,
+                     double ht, double he, const char *tipo,
+                     const char *autorizado, const char *motivo, double valor) {
+  FILE *f = fopen("registros.csv", "a");
+  if (!f) {
+    f = fopen("registros.csv", "w");
+    fprintf(f, "ID,Nome,Salario,Horas_trabalhadas,Horas_extras,Tipo,Autorizado,"
+               "Motivo,Valor_estimado\n");
+  }
+  fprintf(f, "%s,%s,%.2f,%.2f,%.2f,%s,%s,%s,%.2f\n", id, nome, salario, ht, he,
+          tipo, autorizado, motivo, valor);
+  fclose(f);
+}
+
+int main() {
+  checar_reset_csv();
+
+  printf("🕰️  SISTEMA DE AUTORIZAÇÃO DE HORA EXTRA 🗂️\n\n");
+
+  char id[20], nome[100];
+  double salario;
+  Time inicio, fim, proxima;
+  double horas_extras;
+
+  printf("Número de matrícula / 🆔: ");
+  fgets(id, sizeof(id), stdin);
+  id[strcspn(id, "\n")] = 0;
+
+  printf("Nome do funcionário: ");
+  fgets(nome, sizeof(nome), stdin);
+  nome[strcspn(nome, "\n")] = 0;
+
+  salario = buscar_salario_por_id(id);
+  if (salario < 0) {
+    printf("Salário não encontrado. Informe o salário mensal (R$)💰: ");
+    scanf("%lf", &salario);
+  } else {
+    printf("Salário encontrado no sistema💰: R$ %.2f\n", salario);
+  }
+
+  printf("Hora de início (HH:MM)🕓: ");
+  scanf("%d:%d", &inicio.hh, &inicio.mm);
+  printf("Hora de término (HH:MM)🕓: ");
+  scanf("%d:%d", &fim.hh, &fim.mm);
+  printf("Hora da próxima jornada (HH:MM)🕓: ");
+  scanf("%d:%d", &proxima.hh, &proxima.mm);
+  printf("Horas extras pretendidas🕓: ");
+  scanf("%lf", &horas_extras);
+
+  double ht = diff_minutes(inicio, fim) / 60.0;
+  double total_dia = ht + horas_extras;
+  double descanso = diff_minutes(fim, proxima) / 60.0;
+  double horas_mes = ler_horas_extras_mes();
+
+  double valor_hora = salario / 220.0;
+  double valor_extra = valor_hora * 1.5;
+  double valor_extra_not = valor_extra * 1.25;
+
+  int noturna = is_night_extra(fim, horas_extras);
+  char tipo[20] = "Diurna 🌞";
+  if (noturna)
+    strcpy(tipo, "Noturna 🌑");
+
+  int autorizado = 1;
+  char motivo[200] = "";
+
+  if (ht > 8) {
+    autorizado = 0;
+    sprintf(motivo, "Jornada ultrapassa 8h normais ⚠️.");
+  } else if (total_dia > 10) {
+    autorizado = 0;
+    sprintf(motivo, "Total diário ultrapassa 10h ⚠️.");
+  } else if (descanso < 11) {
+    autorizado = 0;
+    sprintf(motivo, "Descanso inferior a 11h entre jornadas 🚨.");
+  } else if (horas_mes + horas_extras > 48) {
+    autorizado = 0;
+    sprintf(motivo, "Limite mensal de 48h excedido ⚠️ (atual: %.2f h).",
+            horas_mes);
+  } else {
+    sprintf(motivo, "Requisitos legais atendidos 😸.");
+  }
+
+  double valor_estimado =
+      noturna ? horas_extras * valor_extra_not : horas_extras * valor_extra;
+
+  printf("\n=== RESULTADO ===\n");
+  printf("Funcionário: %s (ID: %s)\n", nome, id);
+  printf("Horas trabalhadas: %.2f\n", ht);
+  printf("Horas extras: %.2f\n", horas_extras);
+  printf("Descanso: %.2f h | Total do dia: %.2f h\n", descanso, total_dia);
+  printf("Horas extras acumuladas no mês: %.2f h\n", horas_mes);
+
+  if (autorizado) {
+    printf("\n\U0001F680 HORA EXTRA AUTORIZADA!\n");
+    printf("Tipo: %s | Valor estimado: R$ %.2f\n", tipo, valor_estimado);
+    salvar_registro(id, nome, salario, ht, horas_extras, tipo, "SIM", motivo,
+                    valor_estimado);
+  } else {
+    printf("\n🚫 HORA EXTRA NEGADA.\nMotivo: %s\n", motivo);
+    salvar_registro(id, nome, salario, ht, horas_extras, tipo, "NÃO", motivo,
+                    0.0);
+  }
+
+  printf("\nBase legal: CLT Art. 59 e 66 — máx. 2h extras/dia e 48h/mês.\n");
+  return 0;
+}
