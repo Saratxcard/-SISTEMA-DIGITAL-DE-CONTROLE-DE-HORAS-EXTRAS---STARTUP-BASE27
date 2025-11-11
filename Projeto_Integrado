@@ -2,16 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <wchar.h>
+#include <unistd.h>
 
 typedef struct {
   int hh, mm;
 } Time;
 
-// Converte hora:minuto em minutos totais
 int to_minutes(Time t) { return t.hh * 60 + t.mm; }
 
-// Calcula a diferença em minutos (considera se passou da meia-noite)
 int diff_minutes(Time start, Time end) {
   int a = to_minutes(start);
   int b = to_minutes(end);
@@ -20,7 +18,6 @@ int diff_minutes(Time start, Time end) {
   return (24 * 60 - a) + b;
 }
 
-// Verifica se há horas extras noturnas (22h–5h)
 int is_night_extra(Time fim, double horas_extras) {
   int start = to_minutes(fim);
   int end = (start + (int)(horas_extras * 60)) % (24 * 60);
@@ -30,34 +27,34 @@ int is_night_extra(Time fim, double horas_extras) {
   return 0;
 }
 
-// Lê o mês atual do sistema
 int mes_atual() {
   time_t t = time(NULL);
   struct tm *data = localtime(&t);
   return data->tm_mon + 1;
 }
 
-// Verifica se deve resetar o CSV (nova virada de mês)
 void checar_reset_csv() {
   FILE *meta = fopen("meta.txt", "r");
-  int mes_registrado = -1;
+  int mes_reg = -1;
+
   if (meta) {
-    fscanf(meta, "%d", &mes_registrado);
+    fscanf(meta, "%d", &mes_reg);
     fclose(meta);
   }
 
   int mes_agora = mes_atual();
 
-  // Quando o mês mudar, renomeia o CSV e cria um novo
-  if (mes_registrado != mes_agora) {
+  if (mes_reg != mes_agora) {
     char novo_nome[50];
     time_t t = time(NULL);
-    struct tm *data = localtime(&t);
-    sprintf(novo_nome, "registros_%02d_%d.csv", data->tm_mon,
-            data->tm_year + 1900);
+    struct tm *d = localtime(&t);
 
-    rename("registros.csv", novo_nome);
-    FILE *novo = fopen("registros.csv", "w");
+    sprintf(novo_nome, "registros_%02d_%d.csv", d->tm_mon + 1,
+            d->tm_year + 1900);
+
+    rename("solicitacoes.csv", novo_nome);
+
+    FILE *novo = fopen("solicitacoes.csv", "w");
     if (novo) {
       fprintf(novo, "ID,Nome,Salario,Horas_trabalhadas,Horas_extras,Tipo,"
                     "Autorizado,Motivo,Valor_estimado\n");
@@ -65,50 +62,53 @@ void checar_reset_csv() {
     }
 
     meta = fopen("meta.txt", "w");
-    if (meta) {
-      fprintf(meta, "%d", mes_agora);
-      fclose(meta);
-    }
-
-    printf("🔄 Novo mês detectado. Registros antigos arquivados como '%s'.\n" ,
-           novo_nome);
+    fprintf(meta, "%d", mes_agora);
+    fclose(meta);
   }
 }
 
-// Busca salário mais recente pelo ID
 double buscar_salario_por_id(const char *id) {
-  FILE *f = fopen("registros.csv", "r");
+  FILE *f = fopen("solicitacoes.csv", "r");
   if (!f)
     return -1;
+
   char linha[256];
-  fgets(linha, sizeof(linha), f); // pular cabeçalho
+  fgets(linha, sizeof(linha), f);
 
   double salario = -1;
   char id_csv[50];
+
   while (fgets(linha, sizeof(linha), f)) {
-    char nome[100], tipo[20], autorizado[5], motivo[200];
+    char nome[100], tipo[20], autorizado[10], motivo[200];
     double s, ht, he, valor;
+
     sscanf(linha, "%[^,],%*[^,],%lf,%lf,%lf,%[^,],%[^,],%[^,],%lf", id_csv, &s,
            &ht, &he, tipo, autorizado, motivo, &valor);
+
     if (strcmp(id_csv, id) == 0)
       salario = s;
   }
+
   fclose(f);
   return salario;
 }
 
-// Soma horas extras autorizadas do mês
 double ler_horas_extras_mes() {
-  FILE *f = fopen("registros.csv", "r");
+  FILE *f = fopen("solicitacoes.csv", "r");
   if (!f)
     return 0.0;
+
   char linha[256];
   fgets(linha, sizeof(linha), f);
+
   double total = 0.0;
+
   while (fgets(linha, sizeof(linha), f)) {
     double he;
     char autorizado[10];
-    sscanf(linha, "%*[^,],%*[^,],%*f,%*f,%lf,%*[^,],%[^,]", &he, autorizado);
+
+    sscanf(linha, "%*[^,],%*[^,],%*lf,%*lf,%lf,%*[^,],%[^,]", &he, autorizado);
+
     if (strcmp(autorizado, "SIM") == 0)
       total += he;
   }
@@ -116,58 +116,161 @@ double ler_horas_extras_mes() {
   return total;
 }
 
-// Salva novo registro
-void salvar_registro(const char *id, const char *nome, double salario,
-                     double ht, double he, const char *tipo,
-                     const char *autorizado, const char *motivo, double valor) {
-  FILE *f = fopen("registros.csv", "a");
+void salvar_solicitacao(const char *id, const char *nome, double salario,
+                        double ht, double he, const char *tipo,
+                        const char *motivo, double valor) {
+
+  FILE *f = fopen("solicitacoes.csv", "a");
+
   if (!f) {
-    f = fopen("registros.csv", "w");
+    f = fopen("solicitacoes.csv", "w");
     fprintf(f, "ID,Nome,Salario,Horas_trabalhadas,Horas_extras,Tipo,Autorizado,"
                "Motivo,Valor_estimado\n");
   }
-  fprintf(f, "%s,%s,%.2f,%.2f,%.2f,%s,%s,%s,%.2f\n", id, nome, salario, ht, he,
-          tipo, autorizado, motivo, valor);
+
+  fprintf(f, "%s,%s,%.2f,%.2f,%.2f,%s,PENDENTE,%s,%.2f\n", id, nome, salario,
+          ht, he, tipo, motivo, valor);
+
   fclose(f);
 }
 
-int main() {
-  checar_reset_csv();
+void atualizar_status_csv(const char *id_alvo, const char *novo_status,
+                          const char *novo_motivo) {
+  FILE *f = fopen("solicitacoes.csv", "r");
+  if (!f) {
+    printf("\033[31mNenhum arquivo de solicitacoes encontrado.\033[0m\n");
+    return;
+  }
 
-  printf("🕰️  SISTEMA DE AUTORIZAÇÃO DE HORA EXTRA 🗂️\n\n");
+  FILE *temp = fopen("temp.csv", "w");
 
+  char linha[300];
+  fgets(linha, sizeof(linha), f);
+  fprintf(temp, "%s", linha);
+
+  while (fgets(linha, sizeof(linha), f)) {
+    char id_csv[50];
+    char nome[100], tipo[20], autorizado[20], motivo[200];
+    double salario, ht, he, valor;
+
+    sscanf(linha, "%[^,],%[^,],%lf,%lf,%lf,%[^,],%[^,],%[^,],%lf", id_csv, nome,
+           &salario, &ht, &he, tipo, autorizado, motivo, &valor);
+
+    if (strcmp(id_csv, id_alvo) == 0) {
+      fprintf(temp, "%s,%s,%.2f,%.2f,%.2f,%s,%s,%s,%.2f\n", id_csv, nome,
+              salario, ht, he, tipo, novo_status, novo_motivo, valor);
+    } else {
+      fprintf(temp, "%s", linha);
+    }
+  }
+
+  fclose(f);
+  fclose(temp);
+
+  remove("solicitacoes.csv");
+  rename("temp.csv", "solicitacoes.csv");
+}
+
+// Função para animação de carregamento simples
+void loading_animation(const char *message) {
+  printf("\033[34m%s\033[0m", message);
+  for (int i = 0; i < 3; i++) {
+    printf(".");
+    fflush(stdout);
+    usleep(500000); // 0.5 segundos
+  }
+  printf("\n");
+}
+
+// Função para imprimir logo ASCII da Base27
+void print_logo() {
+  printf("\033[32m");
+  printf("         Base27 - Sistema de Horas Extras 🚀\n");
+  printf("\033[0m\n");
+}
+
+// Função para imprimir caixas ao redor do texto
+void print_box(const char *text) {
+  int len = strlen(text);
+  printf("┌");
+  for (int i = 0; i < len + 2; i++)
+    printf("─");
+  printf("┐\n");
+  printf("│ %s │\n", text);
+  printf("└");
+  for (int i = 0; i < len + 2; i++)
+    printf("─");
+  printf("┘\n");
+}
+
+// Função para imprimir tabela das solicitações
+void print_table_header() {
+  printf("\033["
+         "34m┌────────────┬────────────────────┬────────────┬──────────────────"
+         "┬──────────────┬────────┬────────────┬──────────────────────────────┬"
+         "────────────────┐\033[0m\n");
+  printf("\033[34m│ %-10s │ %-18s │ %-10s │ %-16s │ %-12s │ %-6s │ %-10s │ "
+         "%-28s │ %-14s │\033[0m\n",
+         "ID", "Nome", "Salario", "Horas Trab.", "Horas Extras", "Tipo",
+         "Autorizado", "Motivo", "Valor Estimado");
+  printf("\033["
+         "34m├────────────┼────────────────────┼────────────┼──────────────────"
+         "┼──────────────┼────────┼────────────┼──────────────────────────────┼"
+         "────────────────┤\033[0m\n");
+}
+
+void print_table_row(const char *id, const char *nome, double salario,
+                     double ht, double he, const char *tipo,
+                     const char *autorizado, const char *motivo, double valor) {
+  printf("│ %-10s │ %-18s │ %-10.2f │ %-16.2f │ %-12.2f │ %-6s │ %-10s │ %-28s "
+         "│ %-14.2f │\n",
+         id, nome, salario, ht, he, tipo, autorizado, motivo, valor);
+}
+
+void print_table_footer() {
+  printf("\033["
+         "34m└────────────┴────────────────────┴────────────┴──────────────────"
+         "┴──────────────┴────────┴────────────┴──────────────────────────────┴"
+         "────────────────┘\033[0m\n");
+}
+
+void menu_funcionario() {
+  print_box("👤 Menu do Funcionário");
   char id[20], nome[100];
   double salario;
   Time inicio, fim, proxima;
   double horas_extras;
 
-  printf("Número de matrícula / 🆔: ");
+  printf("\033[32m📝 Numero de matricula: \033[0m");
   fgets(id, sizeof(id), stdin);
   id[strcspn(id, "\n")] = 0;
 
-  printf("Nome do funcionário: ");
+  printf("\033[32m👤 Nome: \033[0m");
   fgets(nome, sizeof(nome), stdin);
   nome[strcspn(nome, "\n")] = 0;
 
   salario = buscar_salario_por_id(id);
+
   if (salario < 0) {
-    printf("Salário não encontrado. Informe o salário mensal (R$)💰: ");
+    printf(
+        "\033[31m💰 Salario nao encontrado. Informe o salario mensal: \033[0m");
     scanf("%lf", &salario);
   } else {
-    printf("Salário encontrado no sistema💰: R$ %.2f\n", salario);
+    printf("\033[32m💰 Salario encontrado: %.2f\n\033[0m", salario);
   }
 
-  printf("Hora de início (HH:MM)🕓: ");
+  printf("\033[32m🕒 Inicio (HH:MM): \033[0m");
   scanf("%d:%d", &inicio.hh, &inicio.mm);
-  printf("Hora de término (HH:MM)🕓: ");
+  printf("\033[32m🕒 Fim (HH:MM): \033[0m");
   scanf("%d:%d", &fim.hh, &fim.mm);
-  printf("Hora da próxima jornada (HH:MM)🕓: ");
+  printf("\033[32m🕒 Proxima jornada (HH:MM): \033[0m");
   scanf("%d:%d", &proxima.hh, &proxima.mm);
-  printf("Horas extras pretendidas🕓: ");
+  printf("\033[32m⏰ Horas extras pretendidas: \033[0m");
   scanf("%lf", &horas_extras);
 
+  getchar();
+
   double ht = diff_minutes(inicio, fim) / 60.0;
-  double total_dia = ht + horas_extras;
   double descanso = diff_minutes(fim, proxima) / 60.0;
   double horas_mes = ler_horas_extras_mes();
 
@@ -176,51 +279,103 @@ int main() {
   double valor_extra_not = valor_extra * 1.25;
 
   int noturna = is_night_extra(fim, horas_extras);
-  char tipo[20] = "Diurna 🌞";
+  char tipo[20] = "Diurna";
   if (noturna)
-    strcpy(tipo, "Noturna 🌑");
-
-  int autorizado = 1;
-  char motivo[200] = "";
-
-  if (ht > 8) {
-    autorizado = 0;
-    sprintf(motivo, "Jornada ultrapassa 8h normais ⚠️.");
-  } else if (total_dia > 10) {
-    autorizado = 0;
-    sprintf(motivo, "Total diário ultrapassa 10h ⚠️.");
-  } else if (descanso < 11) {
-    autorizado = 0;
-    sprintf(motivo, "Descanso inferior a 11h entre jornadas 🚨.");
-  } else if (horas_mes + horas_extras > 48) {
-    autorizado = 0;
-    sprintf(motivo, "Limite mensal de 48h excedido ⚠️ (atual: %.2f h).",
-            horas_mes);
-  } else {
-    sprintf(motivo, "Requisitos legais atendidos 😸.");
-  }
+    strcpy(tipo, "Noturna");
 
   double valor_estimado =
       noturna ? horas_extras * valor_extra_not : horas_extras * valor_extra;
 
-  printf("\n=== RESULTADO ===\n");
-  printf("Funcionário: %s (ID: %s)\n", nome, id);
-  printf("Horas trabalhadas: %.2f\n", ht);
-  printf("Horas extras: %.2f\n", horas_extras);
-  printf("Descanso: %.2f h | Total do dia: %.2f h\n", descanso, total_dia);
-  printf("Horas extras acumuladas no mês: %.2f h\n", horas_mes);
+  loading_animation("📤 Salvando solicitacao");
+  salvar_solicitacao(id, nome, salario, ht, horas_extras, tipo,
+                     "Aguardando avaliacao do gestor", valor_estimado);
 
-  if (autorizado) {
-    printf("\n\U0001F680 HORA EXTRA AUTORIZADA!\n");
-    printf("Tipo: %s | Valor estimado: R$ %.2f\n", tipo, valor_estimado);
-    salvar_registro(id, nome, salario, ht, horas_extras, tipo, "SIM", motivo,
-                    valor_estimado);
-  } else {
-    printf("\n🚫 HORA EXTRA NEGADA.\nMotivo: %s\n", motivo);
-    salvar_registro(id, nome, salario, ht, horas_extras, tipo, "NÃO", motivo,
-                    0.0);
+  printf("\033[32m✅ As informacoes foram enviadas ao gestor e serao "
+         "analisadas.\033[0m\n");
+}
+
+void menu_gestor() {
+  print_box("👨‍💼 Menu do Gestor");
+  char senha[20];
+
+  printf("\033[32m🔐 Senha do gestor: \033[0m");
+  fgets(senha, sizeof(senha), stdin);
+  senha[strcspn(senha, "\n")] = 0;
+
+  if (strcmp(senha, "admin") != 0) {
+    printf("\033[31m❌ Senha incorreta.\033[0m\n");
+    return;
   }
 
-  printf("\nBase legal: CLT Art. 59 e 66 — máx. 2h extras/dia e 48h/mês.\n");
+  FILE *f = fopen("solicitacoes.csv", "r");
+  if (!f) {
+    printf("\033[31m📁 Nenhum arquivo de solicitacoes encontrado.\033[0m\n");
+    return;
+  }
+
+  char linha[300];
+  fgets(linha, sizeof(linha), f);
+
+  printf("\033[34m\n📋 Solicitacoes pendentes:\n\033[0m");
+  print_table_header();
+
+  while (fgets(linha, sizeof(linha), f)) {
+    char id_csv[50], nome[100], tipo[20], autorizado[20], motivo[200];
+    double salario, ht, he, valor;
+
+    sscanf(linha, "%[^,],%[^,],%lf,%lf,%lf,%[^,],%[^,],%[^,],%lf", id_csv, nome,
+           &salario, &ht, &he, tipo, autorizado, motivo, &valor);
+
+    if (strcmp(autorizado, "PENDENTE") == 0) {
+      print_table_row(id_csv, nome, salario, ht, he, tipo, autorizado, motivo,
+                      valor);
+    }
+  }
+
+  print_table_footer();
+  fclose(f);
+
+  char id_decisao[20];
+  char escolha[5];
+
+  printf("\033[32m🔍 Digite o ID para decidir: \033[0m");
+  fgets(id_decisao, sizeof(id_decisao), stdin);
+  id_decisao[strcspn(id_decisao, "\n")] = 0;
+
+  printf("\033[32m✅ Aprovar (S) ou Negar (N): \033[0m");
+  fgets(escolha, sizeof(escolha), stdin);
+
+  loading_animation("🔄 Atualizando status");
+  if (escolha[0] == 'S' || escolha[0] == 's') {
+    atualizar_status_csv(id_decisao, "SIM", "Aprovado pelo gestor");
+    printf("\033[32m✅ Solicitacao aprovada.\033[0m\n");
+  } else {
+    atualizar_status_csv(id_decisao, "NAO", "Negado pelo gestor");
+    printf("\033[31m❌ Solicitacao negada.\033[0m\n");
+  }
+}
+
+int main() {
+  checar_reset_csv();
+  print_logo();
+
+  int op;
+
+  do {
+    print_box("🏠 Menu Principal");
+    printf("\033[34m1 - 👤 Menu funcionario\n\033[0m");
+    printf("\033[34m2 - 👨‍💼 Menu gestor\n\033[0m");
+    printf("\033[31m0 - 🚪 Sair\n\033[0m");
+    printf("\033[32m🔢 Opcao: \033[0m");
+    scanf("%d", &op);
+    getchar();
+
+    if (op == 1)
+      menu_funcionario();
+    else if (op == 2)
+      menu_gestor();
+
+  } while (op != 0);
+
   return 0;
 }
