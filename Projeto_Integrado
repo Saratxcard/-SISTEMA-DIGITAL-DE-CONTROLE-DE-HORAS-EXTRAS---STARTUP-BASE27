@@ -171,7 +171,7 @@ void atualizar_status_csv(const char *id_alvo, const char *novo_status,
   rename("temp.csv", "solicitacoes.csv");
 }
 
-// Função para animação de carregamento simples
+
 void loading_animation(const char *message) {
   printf("\033[34m%s\033[0m", message);
   for (int i = 0; i < 3; i++) {
@@ -182,14 +182,14 @@ void loading_animation(const char *message) {
   printf("\n");
 }
 
-// Função para imprimir logo ASCII da Base27
+
 void print_logo() {
   printf("\033[32m");
   printf("         Base27 - Sistema de Horas Extras 🚀\n");
   printf("\033[0m\n");
 }
 
-// Função para imprimir caixas ao redor do texto
+
 void print_box(const char *text) {
   int len = strlen(text);
   printf("┌");
@@ -291,6 +291,16 @@ void menu_funcionario() {
     atualizar_status_csv(id, "NAO", "Excede limite mensal de 40 horas extras");
     return;
   }
+  if (descanso < 11.0) {
+    printf("\033[31m❌ Solicitacao negada automaticamente: Intervalo entre "
+           "jornadas inferior a 11 horas (Art. 66).\033[0m\n");
+    salvar_solicitacao(id, nome, salario, ht, horas_extras, "Diurna",
+                       "Intervalo entre jornadas inferior a 11 horas (Art. 66)",
+                       0.0);
+    atualizar_status_csv(
+        id, "NAO", "Intervalo entre jornadas inferior a 11 horas (Art. 66)");
+    return;
+  }
 
   double valor_hora = salario / 220.0;
   double valor_extra = valor_hora * 1.5;
@@ -360,8 +370,6 @@ void menu_gestor() {
   fgets(id_decisao, sizeof(id_decisao), stdin);
   id_decisao[strcspn(id_decisao, "\n")] = 0;
 
-  // Verificar novamente no gestor se excede (embora já verificado no
-  // funcionário, para segurança)
   double horas_mes = ler_horas_extras_mes();
   double he_solicitada = 0.0;
   f = fopen("solicitacoes.csv", "r");
