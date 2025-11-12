@@ -274,6 +274,24 @@ void menu_funcionario() {
   double descanso = diff_minutes(fim, proxima) / 60.0;
   double horas_mes = ler_horas_extras_mes();
 
+  // Verificações automáticas de negação conforme lei (CLT: até 2h/dia, 40h/mês)
+  if (horas_extras > 2.0) {
+    printf("\033[31m❌ Solicitacao negada automaticamente: Excede limite diario "
+           "de 2 horas extras.\033[0m\n");
+    salvar_solicitacao(id, nome, salario, ht, horas_extras, "Diurna",
+                       "Excede limite diario de 2 horas extras", 0.0);
+    atualizar_status_csv(id, "NAO", "Excede limite diario de 2 horas extras");
+    return;
+  }
+  if (horas_mes + horas_extras > 40.0) {
+    printf("\033[31m❌ Solicitacao negada automaticamente: Excede limite mensal "
+           "de 40 horas extras.\033[0m\n");
+    salvar_solicitacao(id, nome, salario, ht, horas_extras, "Diurna",
+                       "Excede limite mensal de 40 horas extras", 0.0);
+    atualizar_status_csv(id, "NAO", "Excede limite mensal de 40 horas extras");
+    return;
+  }
+
   double valor_hora = salario / 220.0;
   double valor_extra = valor_hora * 1.5;
   double valor_extra_not = valor_extra * 1.25;
@@ -341,6 +359,30 @@ void menu_gestor() {
   printf("\033[32m🔍 Digite o ID para decidir: \033[0m");
   fgets(id_decisao, sizeof(id_decisao), stdin);
   id_decisao[strcspn(id_decisao, "\n")] = 0;
+
+  // Verificar novamente no gestor se excede (embora já verificado no
+  // funcionário, para segurança)
+  double horas_mes = ler_horas_extras_mes();
+  double he_solicitada = 0.0;
+  f = fopen("solicitacoes.csv", "r");
+  fgets(linha, sizeof(linha), f);
+  while (fgets(linha, sizeof(linha), f)) {
+    char id_csv[50];
+    sscanf(linha, "%[^,]", id_csv);
+    if (strcmp(id_csv, id_decisao) == 0) {
+      sscanf(linha, "%*[^,],%*[^,],%*lf,%*lf,%lf", &he_solicitada);
+      break;
+    }
+  }
+  fclose(f);
+
+  if (horas_mes + he_solicitada > 40.0) {
+    printf("\033[31m❌ Solicitacao negada automaticamente: Excede limite mensal "
+           "de 40 horas extras.\033[0m\n");
+    atualizar_status_csv(id_decisao, "NAO",
+                         "Excede limite mensal de 40 horas extras");
+    return;
+  }
 
   printf("\033[32m✅ Aprovar (S) ou Negar (N): \033[0m");
   fgets(escolha, sizeof(escolha), stdin);
