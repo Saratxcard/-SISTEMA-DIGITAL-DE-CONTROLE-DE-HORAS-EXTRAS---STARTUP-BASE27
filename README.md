@@ -1,6 +1,6 @@
 Sistema de Gestão de Horas Extras (Base27) 
 
-Descrição
+Descrição:
 Este projeto implementa um sistema completo de solicitação, cálculo e aprovação de horas extras, inspirado em regras comuns de jornada de trabalho e adicional noturno.
 O sistema é voltado para uso em terminal e foi personalizado com elementos visuais, tabela estruturada, logo da Base27, animações simples e um fluxo completo de funcionário e gestor.
 
